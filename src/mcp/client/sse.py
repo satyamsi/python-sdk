@@ -113,14 +113,42 @@ async def sse_client(
                             async with write_stream_reader:
                                 async for message in write_stream_reader:
                                     logger.debug(f"Sending client message: {message}")
-                                    response = await client.post(
-                                        endpoint_url,
-                                        json=message.model_dump(
-                                            by_alias=True,
-                                            mode="json",
-                                            exclude_none=True,
-                                        ),
+
+                                    # Hack start
+                                    info = message.model_dump(
+                                        by_alias=True,
+                                        mode="json",
+                                        exclude_none=True,
                                     )
+                                    id = info.get("id", None)
+                                    if id is not None and isinstance(id, str) and id.count("-") == 3:
+                                        from opentelemetry import trace
+                                        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+                                        headers = {
+                                            "traceparent": "01-" + id.split("-")[1] + "-" + id.split("-")[2] + "-01",
+                                        }
+                                        propagator = TraceContextTextMapPropagator()
+                                        ctx = propagator.extract(headers)
+                                        tracer = trace.get_tracer(__name__)
+                                        with tracer.start_as_current_span("honored-incoming-span", context=ctx) as span:
+                                            response = await client.post(
+                                                endpoint_url,
+                                                json=message.model_dump(
+                                                    by_alias=True,
+                                                    mode="json",
+                                                    exclude_none=True,
+                                                ),
+                                            )
+                                    else:
+                                    # Hack end
+                                        response = await client.post(
+                                            endpoint_url,
+                                            json=message.model_dump(
+                                                by_alias=True,
+                                                mode="json",
+                                                exclude_none=True,
+                                            ),
+                                        )
                                     response.raise_for_status()
                                     logger.debug(
                                         "Client message sent successfully: "

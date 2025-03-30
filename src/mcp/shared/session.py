@@ -146,6 +146,33 @@ class RequestResponder(Generic[ReceiveRequestT, SendResultT]):
     def cancelled(self) -> bool:
         return self._cancel_scope.cancel_called
 
+# Hack to get open telemetry to work with the session ID
+def r2sid(request_id: RequestId) -> str:
+    """
+    Converts a request ID to a session ID. This is a simple utility function
+    that formats the request ID as a string. The actual conversion logic
+    may vary based on the specific requirements of the application.
+    """
+    from opentelemetry import trace
+
+    span = trace.get_current_span()
+    if span:
+        span_context = span.get_span_context()
+        if span_context.is_valid:
+            return f"00-{span_context.trace_id:032x}-{span_context.span_id:016x}-{request_id}"
+    return str(request_id)
+
+def sid2r(sid: str) -> RequestId:
+    """
+    Converts a session ID back to a request ID. This is a simple utility function
+    that extracts the request ID from the session ID string. The actual conversion
+    logic may vary based on the specific requirements of the application.
+    """
+    parts = sid.split("-")
+    if len(parts) == 4:
+        return int(parts[3])
+    return int(sid)
+
 
 class BaseSession(
     Generic[
@@ -224,6 +251,9 @@ class BaseSession(
 
         request_id = self._request_id
         self._request_id = request_id + 1
+
+        # HACK
+        request_id = r2sid(request_id)
 
         response_stream, response_stream_reader = anyio.create_memory_object_stream[
             JSONRPCResponse | JSONRPCError
